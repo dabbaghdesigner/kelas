@@ -13,7 +13,7 @@ function makePlanner(DATA, STATE) {
   const faName = code => FA[code] || EXTRA_FA[code] || code;
   const CODE_OF = Object.fromEntries([...Object.entries(FA), ...Object.entries(EXTRA_FA)].map(([c, f]) => [f, c]));
   const codeOf = fa => CODE_OF[fa] || fa;
-  const ALL_CODES = [...Object.keys(TT.weekly_hours), ...Object.values(TT.attached || {})];
+  const ALL_CODES = [...new Set([...Object.keys(TT.weekly_hours), ...Object.values(TT.attached || {})])];
   const attached = TT.attached || {};
   const K = (g, code) => `${g}|${code}`;
 
@@ -25,12 +25,23 @@ function makePlanner(DATA, STATE) {
     for (const [k, e] of Object.entries(ed)) r[k] = e.v;
     return r;
   });
+  // STATE.question_edits: {key: {v, ts}} — the teacher's question bank changes (🗃️ tab)
+  //   key "<lesson_id>|<original text>" → v = edited question | null (deleted) | "reset" (back to the original)
+  //   key "new|<id>"                    → v = a question the teacher added (with lesson_id) | null (deleted)
+  const QEDITS = STATE.question_edits || {};
   const QUESTIONS = {};
-  for (const [lid, qs] of Object.entries(DATA.questions)) QUESTIONS[lid] = [...qs];
+  for (const [lid, qs] of Object.entries(DATA.questions)) QUESTIONS[lid] = qs.flatMap(q => {
+    const key = `${lid}|${q.q}`, ed = (QEDITS[key] || {}).v;
+    if (ed === null) return [];
+    return [ed && ed !== "reset" ? { ...q, ...ed, key, edited: true, original: q } : { ...q, key }];
+  });
   for (const q of STATE.teacher_questions || []) {
     const qs = QUESTIONS[q.lesson_id] = QUESTIONS[q.lesson_id] || [];
-    if (!qs.some(x => x.q === q.q)) qs.push({ type: q.type, q: q.q, answer: q.answer || "", source: q.source, options: q.options || [] });
+    if (!qs.some(x => x.q === q.q)) qs.push({ type: q.type, q: q.q, answer: q.answer || "", source: q.source, level: q.level || "", options: q.options || [], key: `${q.lesson_id}|${q.q}` });
   }
+  for (const [key, e] of Object.entries(QEDITS))
+    if (key.startsWith("new|") && e.v && e.v.lesson_id)
+      (QUESTIONS[e.v.lesson_id] = QUESTIONS[e.v.lesson_id] || []).push({ ...e.v, key, source: "معلم" });
 
   function pageImg(lid, page) {
     const [g, code] = lid.split("-");
@@ -63,7 +74,8 @@ function makePlanner(DATA, STATE) {
     const prog = starts();
     for (const [date, day] of logEntries())
       if (date < dateKey) for (const it of day.items) if (it.done) {
-        const k = K(it.grade, codeOf(it.subject)); prog[k] = (prog[k] || 0) + 1;
+        // count: sessions covered (a conference covers its whole lesson; conference prep covers none)
+        const k = K(it.grade, codeOf(it.subject)); prog[k] = (prog[k] || 0) + (it.count ?? 1);
       }
     return prog;
   }
@@ -95,10 +107,13 @@ function makePlanner(DATA, STATE) {
   const prevSchoolDay = day => { day--; while (closed(day)) day--; return day; };
 
   // ------------------------------------------------------------ planning
-  function mode(code, dayIdx, period) {
-    if (TT.joint_subjects.includes(code)) return ["گروهی (هر دو پایه با هم)", ""];
-    return ["درس مشترک، نیم‌زنگ چرخشی", (dayIdx + period) % 2 ? "۶" : "۵"];
-  }
+  // A timetable slot is either a subject code (both grades, same subject: group / rotation / conference)
+  // or {"5": code, "6": code, lead: 5|6} — the teacher teaches the lead grade the whole period («محور»)
+  // while the other grade works on its own (نگارش، املای تمرینی، آماده‌سازی کنفرانس، …).
+  const isConf = code => (TT.conference_subjects || []).includes(code);
+  const slotOf = s => typeof s === "string" ? { 5: s, 6: s, lead: null }
+                                            : { 5: s["5"], 6: s["6"], lead: s["5"] === s["6"] ? null : Number(s.lead) || 5 };
+  const faNum = n => String(n).replace(/\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
 
   // assumeDone: {"grade|code": n} extra sessions treated as done (for planning tomorrow before today is logged)
   function planFor(day, assumeDone = {}) {
@@ -112,30 +127,46 @@ function makePlanner(DATA, STATE) {
     for (const it of (STATE.log[key] || {}).items || [])
       logged[`${it.period}|${it.grade}|${codeOf(it.subject)}`] = it.done ? "بله" : "خیر";
     const used = {};
-    const take = k => { const i = (prog[k] || 0) + (used[k] || 0); used[k] = (used[k] || 0) + 1; return i; };
+    const at = k => (prog[k] || 0) + (used[k] || 0);
+    const take = (k, n = 1) => { const i = at(k); used[k] = (used[k] || 0) + n; return i; };
     info.changed = !!(dayChange(key) && dayChange(key).subjects);
-    daySubjects(day).forEach((code, i) => {
-      const p = i + 1, per = TT.periods[i];
-      const [m, first] = mode(code, wd, p);
-      const conference = (TT.conference_subjects || []).includes(code);
-      const item = { no: p, time: `${per.start}–${per.end}`, code, subject: FA[code],
-                     mode: conference ? "کنفرانس دانش‌آموزان" : m, first, conference, joint: !first, grades: [] };
+    daySubjects(day).forEach((raw, i) => {
+      const p = i + 1, per = TT.periods[i], slot = slotOf(raw);
+      const shared = !slot.lead, code = shared ? slot[5] : slot[slot.lead];
+      const conference = shared && isConf(code), joint = shared && TT.joint_subjects.includes(code);
+      const first = shared ? (joint || conference ? "" : (wd + p) % 2 ? "۶" : "۵") : faNum(slot.lead);
+      const other = slot.lead === 5 ? 6 : 5;
+      const item = { no: p, time: `${per.start}–${per.end}`, code, split: !shared, lead: slot.lead, first, conference, joint,
+                     subject: shared ? faName(code) : `${faName(slot[slot.lead])} پایه ${faNum(slot.lead)} ⭐ | ${faName(slot[other])} پایه ${faNum(other)}`,
+                     mode: conference ? "کنفرانس دانش‌آموزان" : joint ? "گروهی (هر دو پایه با هم)"
+                         : shared ? "درس مشترک، نیم‌زنگ چرخشی" : `محور: پایه ${faNum(slot.lead)} — پایه ${faNum(other)} کار مستقل`,
+                     grades: [] };
       for (const g of GRADES) {
-        const idx = take(K(g, code)), q = QUEUES[K(g, code)];
-        const entry = { grade: g, session_no: idx + 1, logged: logged[`${p}|${g}|${code}`] || null };
+        const gc = slot[g], q = QUEUES[K(g, gc)];
+        const role = conference ? "conference" : joint ? "joint" : shared ? "rotation" : g === slot.lead ? "lead" : "independent";
+        const prep = role === "independent" && isConf(gc);  // getting ready for the next conference: nothing is used up
+        let idx, count = 1;
+        if (prep) { idx = at(K(g, gc)); count = 0; }
+        else if (role === "conference" && q && at(K(g, gc)) < q.length) {  // a conference covers the whole lesson
+          const s = q[at(K(g, gc))]; count = s.parts - s.part + 1; idx = take(K(g, gc), count);
+        } else idx = take(K(g, gc));
+        const entry = { grade: g, code: gc, subject: faName(gc), role, prep, count, session_no: idx + 1,
+                        logged: logged[`${p}|${g}|${gc}`] || null };
+        const code = gc;
         // a book without its own period rides along (Khat in Imla, KarFanavari in Honar)
         const xc = attached[code];
         if (xc && QUEUES[K(g, xc)]) {
           const xq = QUEUES[K(g, xc)], xi = take(K(g, xc));
           if (xi < xq.length) entry.extra = { ...xq[xi], code: xc, subject: EXTRA_FA[xc], logged: logged[`${p}|${g}|${xc}`] || null };
         }
+        if (role === "independent" && q && idx < q.length) entry.task = independentTask(gc, q[idx], prep);
         if (!q) Object.assign(entry, { has_content: false, title: `جلسه ${idx + 1}` });
         else if (idx >= q.length) Object.assign(entry, { has_content: false, title: "کتاب تمام شد — مرور و جبرانی" });
         else {
           const s = q[idx];
           Object.assign(entry, { has_content: true, ...s, questions: QUESTIONS[s.lesson_id] || [],
             previous: idx ? q[idx - 1].title : null, previous_pages: idx ? q[idx - 1].pages : null,
-            next_session: idx + 1 < q.length ? q[idx + 1] : null });
+            next_session: idx + Math.max(count, 1) < q.length ? q[idx + Math.max(count, 1)] : null });
         }
         item.grades.push(entry);
       }
@@ -145,7 +176,21 @@ function makePlanner(DATA, STATE) {
     return info;
   }
 
+  // what the grade that is not the teacher's «محور» does on its own
+  function independentTask(code, s, prep) {
+    const t = `«${s.title}» (ص ${s.pages})`;
+    if (prep) return `آماده‌سازی کنفرانس درس ${t}: درس را بخوانید، خلاصه و ۳ پرسش بنویسید و بین خودتان تقسیم کنید چه کسی کدام بخش را ارائه دهد؛ بعد کاربرگ درس قبل را کامل کنید.`;
+    if (code === "Negaresh") return `تمرین‌های نگارش ${t} را در کتاب حل کنید؛ بعد دو نفری کار هم را بخوانید.`;
+    if (code === "Imla") return `املای تمرینی ${t}: یک دانش‌آموز متن را آرام می‌خواند و بقیه می‌نویسند؛ بعد با کتاب، کار هم را تصحیح کنید و غلط‌ها را سه بار بنویسید.`;
+    return s.independent || `تمرین‌های درس ${t} را حل کنید.`;
+  }
+
   function timing(item) {
+    if (item.split) {
+      const a = faNum(item.lead), b = faNum(item.lead === 5 ? 6 : 5);
+      return [`۰–۵': دستور کار مستقل پایه ${b}`, `۵–۴۰': تدریس کامل پایه ${a} (پایه ${b} کار مستقل)`,
+              `۴۰–۴۵': جمع‌بندی پایه ${a} و بازبینی کار پایه ${b}`];
+    }
     if (item.conference) return ["۰–۱۰': پرسش از درس قبل (هر دو پایه)",
       "۱۰–۳۰': کنفرانس دانش‌آموزان درس جدید (پایه‌ها به نوبت؛ پایه دیگر یادداشت‌برداری)",
       "۳۰–۴۰': جمع‌بندی، نکات ویژه و کاربرد توسط معلم", "۴۰–۴۵': معرفی کاربرگ و تعیین کنفرانس‌دهنده جلسه بعد"];
@@ -167,7 +212,8 @@ function makePlanner(DATA, STATE) {
     const loggedToday = today.periods.some(p => p.grades.some(g => g.logged));
     const done = {};
     if (!loggedToday) for (const p of today.periods) for (const g of p.grades)
-      if (g.has_content) done[K(g.grade, p.code)] = (done[K(g.grade, p.code)] || 0) + 1;
+      if (g.has_content) done[K(g.grade, g.code)] = (done[K(g.grade, g.code)] || 0) + g.count;
+    const mine = (periods, g) => periods.map(p => [p, p.grades.find(x => x.grade === g)]);  // [period, this grade's entry]
     const nxt = nextSchoolDay(day), tomorrow = planFor(nxt, done);
     const weekend = nxt - day > 1;  // e.g. Wednesday → Saturday
     const weekLessons = weekend ? taughtThisWeek(day) : {};
@@ -175,10 +221,7 @@ function makePlanner(DATA, STATE) {
     for (const [k, n] of Object.entries(done)) prog[k] = (prog[k] || 0) + n;
 
     const lastTaught = (g, code) => {  // today's lesson of this subject, or the most recently finished one
-      for (const p of today.periods) if (p.code === code) {
-        const e = p.grades.find(x => x.grade === g);
-        if (e.has_content) return e;
-      }
+      for (const [, e] of mine(today.periods, g)) if (e.code === code && e.has_content && !e.prep) return e;
       const q = QUEUES[K(g, code)], i = (prog[K(g, code)] || 0) - 1;
       return q && i >= 0 && i < q.length ? q[i] : null;
     };
@@ -191,15 +234,13 @@ function makePlanner(DATA, STATE) {
       const f = lastTaught(g, "Farsi");
       if (f) add("Farsi", "today", `درس «${f.title}» (ص ${f.pages}) را دو بار با صدای بلند روخوانی کن و ۵ کلمه‌ی دشوارش را سه بار بنویس.`);
       // conference held today → that grade's own 10-question worksheet goes into the subject notebook
-      for (const p of today.periods) {
-        const e = p.grades.find(x => x.grade === g);
-        if (p.conference && e.has_content)
-          add(p.code, "today", `کاربرگ ۱۰ سؤالی درس «${e.title}» را در دفتر ${faName(p.code)} بنویس و حل کن. ` +
+      for (const [, e] of mine(today.periods, g))
+        if (e.role === "conference" && e.has_content)
+          add(e.code, "today", `کاربرگ ۱۰ سؤالی درس «${e.title}» را در دفتر ${faName(e.code)} بنویس و حل کن. ` +
                                "جلسه‌ی بعد از همین سؤال‌ها پرسیده می‌شود؛ آنها را خوب بخوان.");
-      }
       const seen = new Set(["Riazi", "Farsi"]);
-      for (const p of tomorrow.periods || []) {
-        const code = p.code, e = p.grades.find(x => x.grade === g);
+      for (const [, e] of mine(tomorrow.periods || [], g)) {
+        const code = e.code, p = { conference: e.role === "conference" || e.prep };
         if (seen.has(code) || !e.has_content) continue;
         seen.add(code);
         const t = e.title, pg = e.pages;
@@ -215,8 +256,8 @@ function makePlanner(DATA, STATE) {
         else if (code === "Negaresh") add(code, "tomorrow", "کتاب نگارش را همراه بیاور.");
         else if (code === "Tafakor") add(code, "tomorrow", `درباره‌ی «${t.replace("همراه با پایه ۶: ", "")}» فکر کن و نظرت را با یک دلیل بنویس.`);
       }
-      const sheets = today.periods.flatMap(p => p.grades.filter(e => e.grade === g && e.questions && e.questions.length)
-                                                         .map(e => `${p.subject}: ${e.title}`));
+      const sheets = mine(today.periods, g).filter(([, e]) => e.questions && e.questions.length && !e.prep)
+                                           .map(([, e]) => `${e.subject}: ${e.title}`);
       let week = [];
       if (weekend) {  // review everything taught this week, one line per subject
         for (const [code, ls] of Object.entries(weekLessons[g]))
@@ -235,12 +276,12 @@ function makePlanner(DATA, STATE) {
     const found = Object.fromEntries(GRADES.map(g => [g, {}]));
     for (let d = day - Jalali.weekday(day); d <= day; d++) {
       if (closed(d)) continue;
-      for (const p of planFor(d).periods) {
-        if (["Varzesh", "Honar", "Tafakor", "Negaresh", "Insha"].includes(p.code)) continue;
-        for (const e of p.grades) if (e.has_content && e.logged !== "خیر") {
-          const ls = found[e.grade][p.code] = found[e.grade][p.code] || [];
+      for (const p of planFor(d).periods) for (const e of p.grades) {
+        if (["Varzesh", "Honar", "Tafakor", "Negaresh", "Insha"].includes(e.code) || e.prep) continue;
+        if (e.has_content && e.logged !== "خیر") {
+          const ls = found[e.grade][e.code] = found[e.grade][e.code] || [];
           if (ls.every(x => x.lesson_id !== e.lesson_id))
-            ls.push({ lesson_id: e.lesson_id, title: e.title, pages: e.pages, subject: p.subject, questions: e.questions });
+            ls.push({ lesson_id: e.lesson_id, title: e.title, pages: e.pages, subject: e.subject, questions: e.questions });
         }
       }
     }
@@ -291,7 +332,55 @@ function makePlanner(DATA, STATE) {
     return { key: K(Number(g), code), value: target - logged, sessions: target };
   }
 
-  const SUBJECTS = Object.keys(TT.weekly_hours).map(code => ({ code, name: FA[code], budget: TT.weekly_hours[code] }));
-  return { weekTable, dayChange, daySubjects, SUBJECTS, DAYS, PERIODS: TT.periods, planFor, homework, taughtThisWeek, settings, lessons, startForTaughtUntil, closed, nextSchoolDay, prevSchoolDay,
+  // ------------------------------------------------------------ 🔗 integrated teaching (suggestions only)
+  // DATA.integration: [{a, b, kind, theme, hook, joint}] — a lesson of one grade taught together with a related
+  // lesson of the other grade. "near" = each lesson is within NEAR lessons of where that grade/subject is now.
+  const NEAR = 3;
+  const lessonNo = lid => Number(lid.split("-")[2]);
+  function whereNow(g, code, prog) {  // number of the lesson this grade/subject is at (book length + 1 when finished)
+    const q = QUEUES[K(g, code)] || [], i = prog[K(g, code)] || 0;
+    return i < q.length ? lessonNo(q[i].lesson_id) : (q.length ? lessonNo(q[q.length - 1].lesson_id) + 1 : 1);
+  }
+  function side(lid, prog) {
+    const [g, code] = lid.split("-"), row = LESSONS.find(l => l["شناسه"] === lid) || {};
+    const now = whereNow(Number(g), code, prog), n = lessonNo(lid);
+    return { lesson_id: lid, grade: Number(g), code, subject: faName(code), title: row["عنوان درس"] || lid,
+             pages: `${row["از صفحه"]}–${row["تا صفحه"]}`, chapter_title: row["عنوان فصل"] || "",
+             distance: n - now, status: n < now ? "done" : n === now ? "current" : "todo" };
+  }
+  function steps(a, b) {
+    const ga = faNum(a.grade), gb = faNum(b.grade);
+    return [`۵': شروع مشترک هر دو پایه (پیش‌زمینه مشترک)`,
+            `۱۵': تدریس پایه ${ga} — «${a.title}»؛ پایه ${gb} گوش می‌دهد و ۲ نکته مشترک یادداشت می‌کند`,
+            `۱۵': پایه ${ga} فعالیت/تمرین درس خودش | تدریس پایه ${gb} — «${b.title}» با یادآوری همان نکته‌ها`,
+            `۱۰': پایان مشترک (فعالیت یا مسابقه گروه‌های مختلط ۵ و ۶)`];
+  }
+  function integration(dateKey = Jalali.key(Jalali.today())) {
+    const prog = progressBefore(dateKey);
+    return (DATA.integration || []).map((p, i) => {
+      const a = side(p.a, prog), b = side(p.b, prog);
+      return { ...p, id: i, a, b, steps: steps(a, b), near: Math.abs(a.distance) <= NEAR && Math.abs(b.distance) <= NEAR };
+    });
+  }
+  // pairs whose lesson is in this day's plan (for its grade) and whose partner lesson is near for the other grade
+  function integrationFor(plan) {
+    if (plan.closed) return [];
+    const today = new Set(plan.periods.flatMap(p => p.grades.filter(e => e.has_content).map(e => e.lesson_id)));
+    return integration(plan.date).filter(p => (today.has(p.a.lesson_id) && Math.abs(p.b.distance) <= NEAR) ||
+                                              (today.has(p.b.lesson_id) && Math.abs(p.a.distance) <= NEAR));
+  }
+
+  // weekly hours per grade: weekly_hours, overridden per grade by grade_hours (e.g. Kar-o-Fanavari only in grade 6)
+  const budgetFor = (g, code) => ((TT.grade_hours || {})[g] || {})[code] ?? TT.weekly_hours[code];
+  const SUBJECTS = Object.keys(TT.weekly_hours).map(code => ({ code, name: faName(code), budget: TT.weekly_hours[code] }));
+  const isJoint = code => TT.joint_subjects.includes(code);
+
+  // 📝 exam builder: every lesson of a book with its chapter and bank questions
+  function examPool(grade, code) {
+    return LESSONS.filter(l => Number(l["پایه"]) === Number(grade) && codeOf(l["درس"]) === code).map(l => ({
+      lesson_id: l["شناسه"], chapter: l["فصل"], chapter_title: l["عنوان فصل"], title: l["عنوان درس"],
+      pages: `${l["از صفحه"]}–${l["تا صفحه"]}`, questions: QUESTIONS[l["شناسه"]] || [] }));
+  }
+  return { budgetFor, examPool, integration, integrationFor, slotOf, isConf, isJoint, weekTable, dayChange, daySubjects, SUBJECTS, DAYS, PERIODS: TT.periods, planFor, homework, taughtThisWeek, settings, lessons, startForTaughtUntil, closed, nextSchoolDay, prevSchoolDay,
            progressBefore, faName, codeOf, ALL_CODES, GRADES };
 }

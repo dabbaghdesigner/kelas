@@ -14,7 +14,7 @@ const Store = (() => {
   let DATA = null, STATE = null, P = null;
 
   const emptyState = () => ({ starts: {}, log: {}, school: { school: "", teacher: "", ts: 0 }, lesson_edits: {}, teacher_questions: [],
-                              timetables: {}, day_changes: {} });
+                              timetables: {}, day_changes: {}, question_edits: {} });
   const normalize = s => Object.assign(emptyState(), s || {});
 
   async function http(url, body) {
@@ -63,8 +63,8 @@ const Store = (() => {
     b = normalize(b);
     const n = { days: 0, starts: 0, edits: 0, questions: 0, school: false, timetables: 0 };
     for (const [k, e] of Object.entries(b.starts)) if (newer(out.starts[k], e) !== out.starts[k]) { out.starts[k] = e; n.starts++; }
-    for (const part of ["timetables", "day_changes"])
-      for (const [k, e] of Object.entries(b[part])) if (newer(out[part][k], e) !== out[part][k]) { out[part][k] = e; n.timetables++; }
+    for (const part of ["timetables", "day_changes", "question_edits"])
+      for (const [k, e] of Object.entries(b[part])) if (newer(out[part][k], e) !== out[part][k]) { out[part][k] = e; part === "question_edits" ? n.questions++ : n.timetables++; }
     for (const [d, e] of Object.entries(b.log)) if (newer(out.log[d], e) !== out.log[d]) { out.log[d] = e; n.days++; }
     if (newer(out.school, b.school) !== out.school) { out.school = b.school; n.school = true; }
     for (const [id, fields] of Object.entries(b.lesson_edits)) for (const [k, e] of Object.entries(fields)) {
@@ -81,7 +81,7 @@ const Store = (() => {
     const tq = [...STATE.teacher_questions];
     for (const [lid, qs] of Object.entries(DATA.questions)) for (const q of qs)
       if (q.source && q.source !== "کتاب" && !tq.some(x => x.lesson_id === lid && x.q === q.q))
-        tq.push({ lesson_id: lid, type: q.type, q: q.q, options: q.options, answer: q.answer, source: q.source, ts: 0 });
+        tq.push({ lesson_id: lid, type: q.type, q: q.q, options: q.options, answer: q.answer, source: q.source, level: q.level || "", ts: 0 });
     const body = { app: "classroom-multigrade", version: 1, exported_at: new Date().toISOString(),
                    from: MODE === "server" ? "ویندوز" : "گوشی", state: { ...STATE, teacher_questions: tq } };
     const today = Jalali.key(Jalali.today(), "-");
@@ -118,6 +118,9 @@ const Store = (() => {
       case "settings": return P.settings();
       case "lessons": return { lessons: P.lessons() };
       case "timetable": return P.weekTable(q.get("date") || "9999/99/99");
+      case "integration": return P.integration(q.get("date") || undefined);
+      case "exam_pool": return P.examPool(Number(q.get("grade")), q.get("code"));
+      case "qbank": return P.examPool(Number(q.get("grade")), q.get("code"));
     }
     else switch (path) {
       case "complete": return mutate((s, ts) => {
@@ -143,6 +146,11 @@ const Store = (() => {
       case "timetable": return mutate((s, ts) => {  // {from: "1405/09/01", days: {شنبه: [codes×5], …}}
         s.timetables[body.from] = { v: body.days, ts };
         return { ok: true };
+      });
+      case "question": return mutate((s, ts) => {  // {key, value} — see planner.js (question_edits)
+        const key = body.key || `new|${ts.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        s.question_edits[key] = { v: body.value === undefined ? null : body.value, ts };
+        return { ok: true, key };
       });
       case "day_change": return mutate((s, ts) => {  // {date, value: {subjects}|{closed}|null (= back to normal)}
         s.day_changes[body.date] = { v: body.value || null, ts };

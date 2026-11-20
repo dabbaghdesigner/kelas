@@ -37,7 +37,7 @@ function renderPlan() {
     el.innerHTML = (Store.planner.dayChange(DAY.date) ? dayChangeBar() : "") + `<div class="closed">🌙 ${esc(DAY.closed)} — کلاس تعطیل است</div>`;
     bindDayChange(); return;
   }
-  el.innerHTML = dayChangeBar() + DAY.periods.map(p => `
+  el.innerHTML = dayChangeBar() + integHint() + DAY.periods.map(p => `
     <div class="period">
       <div class="period-head">
         <span class="no">زنگ ${fa(p.no)}</span><span class="subj">${esc(p.subject)}</span>
@@ -47,7 +47,7 @@ function renderPlan() {
       <ul class="timing">${p.timing.map(t => `<li>${esc(t)}</li>`).join("")}</ul>
       <div class="grades">${p.grades.map(g => gradeBlock(p, g)).join("")}</div>
     </div>`).join("");
-  bindDayChange();
+  bindDayChange(); bindIntegHint();
 }
 
 function extraBlock(x) {
@@ -62,15 +62,24 @@ function gradeBlock(p, g) {
   if (!g.has_content) return `<div class="grade g${g.grade}">${logged}<h4>پایه ${fa(g.grade)}</h4>
       <div class="title">${esc(g.title)}</div><div class="empty">محتوای این درس هنوز در بانک وارد نشده است.</div>${extraBlock(g.extra)}</div>`;
   const row = (k, v, cls = "") => v ? `<div class="kv ${cls}"><b>${k}:</b> ${esc(v)}</div>` : "";
+  if (g.role === "independent")  // the teacher is with the other grade: just the task, ready to read out
+    return `<div class="grade g${g.grade} indep">${logged}
+      <h4>پایه ${fa(g.grade)} — 🧩 کار مستقل: ${esc(g.subject)}</h4>
+      <div class="title">${esc(g.title)}</div>
+      ${row("صفحات", fa(g.pages))}
+      <div class="kv task"><b>دستور کار:</b> ${esc(fa(g.task || ""))}</div>
+      ${row("نکات معلم", g.teacher_notes, "note")}
+      ${extraBlock(g.extra)}</div>`;
+  const conf = g.role === "conference", star = g.role === "lead" ? " ⭐ محور" : "";
   return `<div class="grade g${g.grade}">${logged}
-    <h4>پایه ${fa(g.grade)} — فصل ${fa(g.chapter)}: ${esc(g.chapter_title)}</h4>
+    <h4>پایه ${fa(g.grade)}${star} — ${esc(g.subject)} · فصل ${fa(g.chapter)}: ${esc(g.chapter_title)}</h4>
     <div class="title">${esc(g.title)}</div>
-    ${row("صفحات", fa(g.pages) + `  (جلسه ${fa(g.part)} از ${fa(g.parts)})`)}
-    ${row(p.conference ? "پرسش از درس قبل" : "پرسش کوتاه از", g.previous && `${g.previous} (ص ${fa(g.previous_pages)})`)}
+    ${row("صفحات", fa(g.pages) + (conf && g.count > 1 ? "  (کل درس در یک کنفرانس)" : `  (جلسه ${fa(g.part)} از ${fa(g.parts)})`))}
+    ${row(conf ? "پرسش از درس قبل" : "پرسش کوتاه از", g.previous && `${g.previous} (ص ${fa(g.previous_pages)})`)}
     ${row("هدف", g.objectives)}
-    ${row("روش تدریس", p.conference ? "کنفرانس دانش‌آموزان + جمع‌بندی معلم" : g.method)}
-    ${row(p.conference ? "نکات جمع‌بندی معلم" : "درسنامه", p.conference ? (g.key_notes || g.concepts) : g.lesson_plan)}
-    ${row("کار مستقل (وقتی با پایه دیگر هستید)", p.joint || p.conference ? "" : g.independent)}
+    ${row("روش تدریس", conf ? "کنفرانس دانش‌آموزان + جمع‌بندی معلم" : g.method)}
+    ${row(conf ? "نکات جمع‌بندی معلم" : "درسنامه", conf ? (g.key_notes || g.concepts) : g.lesson_plan)}
+    ${row("کار مستقل (وقتی با پایه دیگر هستید)", g.role === "rotation" ? g.independent : "")}
     ${row("کاربرد / کاربرگ", g.worksheet_idea)}
     ${row("نکات معلم", g.teacher_notes, "note")}
     ${row("شرح بیشتر", g.teacher_detail, "note")}
@@ -92,9 +101,13 @@ function cardRows(g) {
   return DAY.periods.map(p => {
     const x = p.grades.find(e => e.grade === g);
     const rows = [];
-    if (p.conference && x.has_content) {
+    if (x.role === "conference" && x.has_content) {
       rows.push(["🎤", "کنفرانس بچه‌ها", `${x.title} (ص ${fa(x.pages)})`]);
       if (x.previous) rows.push(["❓", "پرسش از", x.previous]);
+    } else if (x.prep && x.has_content) {
+      rows.push(["🧩", "آماده‌سازی کنفرانس", `${x.title} (ص ${fa(x.pages)}) + کاربرگ درس قبل`]);
+    } else if (x.role === "independent" && x.has_content) {
+      rows.push(["🧩", "کار مستقل", `${x.title} (ص ${fa(x.pages)})`]);
     } else if (x.has_content) {
       rows.push(["👩‍🏫", "درس امروز", `${x.title} (ص ${fa(x.pages)})`]);
       if (x.previous) rows.push(["❓", "آماده‌ی پرسش از", x.previous]);
@@ -102,8 +115,8 @@ function cardRows(g) {
       rows.push(["🤝", "", "فعالیت گروهی با هم"]);
     }
     if (x.extra) rows.push(["➕", x.extra.subject, `${x.extra.title} (ص ${fa(x.extra.pages)})`]);
-    if (p.conference && x.next_session) rows.push(["📌", "کنفرانس جلسه‌ی بعد", x.next_session.title]);
-    return { p, emoji: EMOJI[p.subject] || "📌", rows };
+    if (x.role === "conference" && x.next_session) rows.push(["📌", "کنفرانس جلسه‌ی بعد", x.next_session.title]);
+    return { p, subject: x.subject, emoji: EMOJI[x.subject] || "📌", rows };
   });
 }
 
@@ -111,7 +124,7 @@ function renderCard() {
   const el = $("#shadCard");
   if (DAY.closed) { el.innerHTML = `<div class="sc-head"><div class="t1">${esc(DAY.closed)}</div></div>`; return; }
   const col = g => `<div class="sc-col g${g}"><h3>👧👦 پایه ${GRADE_NAME(g)}</h3>${cardRows(g).map(c => `
-      <div class="sc-item"><div class="s">${c.emoji} ${esc(c.p.subject)} <span>زنگ ${fa(c.p.no)}</span></div>
+      <div class="sc-item"><div class="s">${c.emoji} ${esc(c.subject)} <span>زنگ ${fa(c.p.no)}</span></div>
         ${c.rows.map(([e, k, v]) => `<div class="${e === "👩‍🏫" ? "l" : "x"}${e === "🎤" || e === "📌" ? " conf" : ""}">${e} ${k ? esc(k) + ": " : ""}${esc(v)}</div>`).join("")}
       </div>`).join("")}</div>`;
   el.innerHTML = `
@@ -130,7 +143,7 @@ $("#cardCopy").onclick = () => {
   for (const g of [5, 6]) {
     lines.push("", "━━━━━━━━━━━━", `👧👦 پایه ${GRADE_NAME(g)}`, "━━━━━━━━━━━━");
     for (const c of cardRows(g)) {
-      lines.push(`${c.emoji} ${c.p.subject} (زنگ ${fa(c.p.no)})`);
+      lines.push(`${c.emoji} ${c.subject} (زنگ ${fa(c.p.no)})`);
       c.rows.forEach(([e, k, v]) => lines.push(`   ${e} ${k ? k + ": " : ""}${v}`));
     }
   }
@@ -205,8 +218,8 @@ function todayLessons(grade) {
   if (DAY.closed) return [];
   return DAY.periods.flatMap(p => {
     const e = p.grades.find(x => x.grade === grade);
-    return e.has_content && e.logged !== "خیر" && e.questions.length
-      ? [{ subject: p.subject, emoji: EMOJI[p.subject] || "📌", title: e.title, pages: e.pages, questions: e.questions }] : [];
+    return e.has_content && !e.prep && e.logged !== "خیر" && e.questions.length
+      ? [{ subject: e.subject, emoji: EMOJI[e.subject] || "📌", title: e.title, pages: e.pages, questions: e.questions }] : [];
   }).filter((l, i, a) => a.findIndex(x => x.title === l.title) === i);  // same lesson twice a day → once
 }
 
@@ -304,8 +317,9 @@ function renderDone() {
   if (DAY.closed) { el.innerHTML = `<div class="closed">روز تعطیل است.</div>`; return; }
   // one row per grade per period, plus a row for a ride-along book (Khat, Kar-o-Fanavari)
   const rows = DAY.periods.flatMap(p => p.grades.flatMap(g => {
-    const main = { p, g, subject: p.subject, title: g.title, lesson_id: g.lesson_id || "",
-                   session: g.has_content ? `${g.part} از ${g.parts}` : g.session_no, logged: g.logged };
+    const main = { p, g, subject: g.subject, count: g.count, title: g.title, lesson_id: g.lesson_id || "",
+                   session: g.prep ? "آماده‌سازی کنفرانس" : g.role === "conference" && g.count > 1 ? "کل درس (کنفرانس)"
+                          : g.has_content ? `${g.part} از ${g.parts}` : g.session_no, logged: g.logged };
     const x = g.extra && { p, g, subject: g.extra.subject, title: g.extra.title, lesson_id: g.extra.lesson_id,
                            session: `${g.extra.part} از ${g.extra.parts}`, logged: g.extra.logged };
     return x ? [main, x] : [main];
@@ -314,7 +328,8 @@ function renderDone() {
   el.innerHTML = `<p class="hint">در پایان روز، زنگ‌هایی را که طبق برنامه انجام شد تیک بزنید. موارد بدون تیک، جلسه بعد دوباره پیشنهاد می‌شوند.</p>
     <table class="grid"><tr><th>زنگ</th><th>درس</th><th>پایه</th><th>عنوان</th><th>انجام شد</th><th>یادداشت</th></tr>
     ${rows.map(r => `<tr>
-      <td>${fa(r.p.no)}</td><td>${esc(r.subject)}</td><td>${fa(r.g.grade)}</td><td>${esc(r.title)}</td>
+      <td>${fa(r.p.no)}</td><td>${esc(r.subject)}${r.count !== undefined && r.g.role === "independent" ? " 🧩" : ""}</td><td>${fa(r.g.grade)}</td>
+      <td>${esc(r.title)} <small class="hint">${esc(fa(r.session))}</small></td>
       <td><input type="checkbox" class="dn" data-i="${r.i}" ${r.logged !== "خیر" ? "checked" : ""}></td>
       <td><input class="nt" data-i="${r.i}" placeholder="اختیاری"></td></tr>`).join("")}
     </table>
@@ -325,6 +340,7 @@ function renderDone() {
   $("#saveDone").onclick = async () => {
     const items = rows.map(r => ({
       period: r.p.no, grade: r.g.grade, subject: r.subject, lesson_id: r.lesson_id, title: r.title, session: r.session,
+      count: r.count ?? 1,
       done: $(`.dn[data-i="${r.i}"]`).checked, note: $(`.nt[data-i="${r.i}"]`).value }));
     await api("/api/complete", { date: DAY.date, on_track: $('input[name="track"]:checked').value === "1", items });
     toast("ثبت شد ✅ برنامه روز بعد به‌روز شد");
