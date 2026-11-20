@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>window.APP_MODE = "pwa";</script>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2f5bea">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>دستیار کلاس چندپایه</title>
+<script src="static/vendor/html2canvas.min.js"></script>
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+<header class="top no-print">
+  <div class="brand">📘 دستیار کلاس چندپایه <small>پایه ۵ و ۶</small></div>
+  <div class="datenav">
+    <button id="prev" title="روز قبل">→</button>
+    <div id="dateLabel" class="date">…</div>
+    <button id="next" title="روز بعد">←</button>
+    <button id="tomorrow" class="ghost">فردا</button>
+    <input id="datePick" placeholder="۱۴۰۵/۰۹/۰۱" size="10">
+  </div>
+  <div class="sync">
+    <button id="exportBtn" class="ghost" title="یک فایل برای بردن به دستگاه دیگر (گوشی ⇄ ویندوز)">📤 خروجی</button>
+    <button id="importBtn" class="ghost" title="فایل خروجی دستگاه دیگر را بخوانید و ادغام کنید">📥 ورودی</button>
+    <input id="importFile" type="file" accept=".json,application/json" hidden>
+  </div>
+</header>
+
+<nav class="tabs no-print">
+  <button data-tab="plan" class="on">🧑‍🏫 برنامه معلم</button>
+  <button data-tab="card">📱 کارت شاد</button>
+  <button data-tab="sheet">📝 کاربرگ</button>
+  <button data-tab="done">✅ ثبت پایان روز</button>
+  <button data-tab="content">📚 محتوای آموزشی</button>
+  <button data-tab="settings">⚙️ تنظیمات</button>
+  <button data-tab="guide">📖 راهنما</button>
+</nav>
+
+<main>
+  <section id="tab-plan" class="tab on"></section>
+
+  <section id="tab-card" class="tab">
+    <div class="toolbar no-print">
+      <button id="cardPng">⬇️ دانلود عکس</button>
+      <button id="cardCopy" class="ghost">📋 کپی متن برای شاد</button>
+    </div>
+    <div class="card-wrap"><div id="shadCard"></div></div>
+    <h3 class="no-print" style="margin:28px 0 8px">🏠 تکلیف امشب</h3>
+    <p class="hint no-print">بر اساس درس‌های همین روز و برنامه‌ی روز بعد ساخته می‌شود. ریاضی و فارسی همیشه هست؛ برای درس‌های فردا آمادگی (قرآن، کنفرانس، املا، …). روی هر متن کلیک کنید و ویرایش کنید؛ ✖ آن بند را حذف می‌کند. «کپی متن» همان متن ویرایش‌شده را کپی می‌کند.</p>
+    <div class="toolbar no-print">
+      <button id="hwPng">⬇️ دانلود عکس تکلیف</button>
+      <button id="hwCopy" class="ghost">📋 کپی متن تکلیف برای شاد</button>
+    </div>
+    <div class="card-wrap"><div id="hwCard"></div></div>
+  </section>
+
+  <section id="tab-sheet" class="tab">
+    <div class="toolbar no-print">
+      <select id="sheetPick"></select>
+      <label><input type="checkbox" id="showAns"> نمایش پاسخ‌ها (فقط برای معلم)</label>
+      <button id="addQ" class="ghost">➕ سؤال جدید</button>
+      <button id="sheetPng">⬇️ عکس</button>
+      <button id="sheetPdf">🖨️ PDF</button>
+    </div>
+    <p class="hint no-print">سؤال‌ها را با تیک انتخاب کنید؛ روی هر متن کلیک کنید تا ویرایش شود. پاسخ‌ها در خروجی نمی‌آیند.</p>
+    <div class="sheet-wrap"><div id="sheet"></div></div>
+  </section>
+
+  <section id="tab-done" class="tab"></section>
+  <section id="tab-content" class="tab">
+    <div class="filters">
+      <input id="fSearch" type="search" placeholder="🔎 جستجو در عنوان، مفاهیم، روش، نکات…">
+      <select id="fGrade"><option value="">همه پایه‌ها</option><option>5</option><option>6</option></select>
+      <select id="fSubject"><option value="">همه درس‌ها</option></select>
+      <select id="fChapter"><option value="">همه فصل‌ها</option></select>
+      <select id="fStatus"><option value="">همه وضعیت‌ها</option><option value="done">✅ تدریس شده</option>
+        <option value="current">▶️ در حال تدریس</option><option value="todo">⏳ مانده</option></select>
+      <select id="fReview"><option value="">بازنگری: همه</option><option value="yes">بازنگری شده</option><option value="no">بازنگری نشده</option></select>
+      <span id="fCount" class="hint"></span>
+    </div>
+    <div class="table-wrap"><table class="grid content-table" id="cTable"></table></div>
+  </section>
+  <div id="drawer" class="drawer"><div class="drawer-box">
+    <div class="drawer-head"><b id="dTitle"></b><button id="dClose" class="ghost">✖</button></div>
+    <div id="dBody"></div>
+    <div class="save-row"><button id="dSave">💾 ذخیره تغییرات</button>
+      <label><input type="checkbox" id="dReviewed"> بازنگری این درس تمام شد</label></div>
+  </div></div>
+  <section id="tab-settings" class="tab"></section>
+  <section id="tab-guide" class="tab">
+    <p class="hint no-print"><a href="static/guide.html" target="_blank">باز کردن راهنما در صفحه جدا / چاپ</a></p>
+    <iframe src="static/guide.html" style="width:100%;height:75vh;border:0"></iframe>
+  </section>
+</main>
+<div id="toast"></div>
+<script src="static/core/jalali.js"></script>
+<script src="static/core/planner.js"></script>
+<script src="static/core/store.js"></script>
+<script src="static/app.js"></script>
+<script src="static/content.js"></script>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");</script>
+</body>
+</html>
