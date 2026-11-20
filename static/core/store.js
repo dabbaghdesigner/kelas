@@ -13,7 +13,8 @@ const Store = (() => {
   const KEY = "classroom-state-v1";
   let DATA = null, STATE = null, P = null;
 
-  const emptyState = () => ({ starts: {}, log: {}, school: { school: "", teacher: "", ts: 0 }, lesson_edits: {}, teacher_questions: [] });
+  const emptyState = () => ({ starts: {}, log: {}, school: { school: "", teacher: "", ts: 0 }, lesson_edits: {}, teacher_questions: [],
+                              timetables: {}, day_changes: {} });
   const normalize = s => Object.assign(emptyState(), s || {});
 
   async function http(url, body) {
@@ -60,8 +61,10 @@ const Store = (() => {
   function merge(a, b) {
     const out = normalize(JSON.parse(JSON.stringify(a)));
     b = normalize(b);
-    const n = { days: 0, starts: 0, edits: 0, questions: 0, school: false };
+    const n = { days: 0, starts: 0, edits: 0, questions: 0, school: false, timetables: 0 };
     for (const [k, e] of Object.entries(b.starts)) if (newer(out.starts[k], e) !== out.starts[k]) { out.starts[k] = e; n.starts++; }
+    for (const part of ["timetables", "day_changes"])
+      for (const [k, e] of Object.entries(b[part])) if (newer(out[part][k], e) !== out[part][k]) { out[part][k] = e; n.timetables++; }
     for (const [d, e] of Object.entries(b.log)) if (newer(out.log[d], e) !== out.log[d]) { out.log[d] = e; n.days++; }
     if (newer(out.school, b.school) !== out.school) { out.school = b.school; n.school = true; }
     for (const [id, fields] of Object.entries(b.lesson_edits)) for (const [k, e] of Object.entries(fields)) {
@@ -114,6 +117,7 @@ const Store = (() => {
       case "school": return { school: STATE.school.school || "", teacher: STATE.school.teacher || "" };
       case "settings": return P.settings();
       case "lessons": return { lessons: P.lessons() };
+      case "timetable": return P.weekTable(q.get("date") || "9999/99/99");
     }
     else switch (path) {
       case "complete": return mutate((s, ts) => {
@@ -134,6 +138,14 @@ const Store = (() => {
       case "lesson": return mutate((s, ts) => {
         const ed = s.lesson_edits[body.id] = s.lesson_edits[body.id] || {};
         for (const [k, v] of Object.entries(body.fields)) ed[k] = { v, ts };
+        return { ok: true };
+      });
+      case "timetable": return mutate((s, ts) => {  // {from: "1405/09/01", days: {شنبه: [codes×5], …}}
+        s.timetables[body.from] = { v: body.days, ts };
+        return { ok: true };
+      });
+      case "day_change": return mutate((s, ts) => {  // {date, value: {subjects}|{closed}|null (= back to normal)}
+        s.day_changes[body.date] = { v: body.value || null, ts };
         return { ok: true };
       });
       case "taught_until": return mutate((s, ts) => {

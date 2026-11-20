@@ -34,6 +34,7 @@
   <button data-tab="card">📱 کارت شاد</button>
   <button data-tab="sheet">📝 کاربرگ</button>
   <button data-tab="done">✅ ثبت پایان روز</button>
+  <button data-tab="week">🗓️ برنامه هفتگی</button>
   <button data-tab="content">📚 محتوای آموزشی</button>
   <button data-tab="settings">⚙️ تنظیمات</button>
   <button data-tab="guide">📖 راهنما</button>
@@ -89,6 +90,7 @@
     <div class="save-row"><button id="dSave">💾 ذخیره تغییرات</button>
       <label><input type="checkbox" id="dReviewed"> بازنگری این درس تمام شد</label></div>
   </div></div>
+  <section id="tab-week" class="tab"></section>
   <section id="tab-settings" class="tab"></section>
   <section id="tab-guide" class="tab">
     <p class="hint no-print"><a href="static/guide.html" target="_blank">باز کردن راهنما در صفحه جدا / چاپ</a></p>
@@ -101,6 +103,7 @@
 <script src="static/core/store.js"></script>
 <script src="static/app.js"></script>
 <script src="static/content.js"></script>
+<script src="static/week.js"></script>
 <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");</script>
 </body>
 </html>

@@ -124,6 +124,16 @@ table.grid select { max-width: 420px; width: 100%; }
   padding: 10px 18px; border-radius: 10px; opacity: 0; transition: .3s; pointer-events: none; }
 #toast.on { opacity: 1; }
 
+/* weekly timetable + one-day change */
+.print-only { display: none; }
+.warnc { color: #b45309; font-weight: 600; }
+.week-grid th, .week-grid td { text-align: center; }
+.week-grid select { width: 100%; min-width: 92px; }
+.daybar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+#dcBox { width: 100%; background: #f7f9fe; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+#dcBox input#dcReason { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; margin-right: 8px; }
+.dc-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+
 .sync { display: flex; gap: 6px; }
 .sync button { background: rgba(255,255,255,.92); }
 
@@ -149,4 +159,8 @@ table.grid select { max-width: 420px; width: 100%; }
   #tab-sheet { display: block !important; } #sheet { border: 0; padding: 10mm; width: auto; min-height: 0; }
   .q.off, .ws-sec.off, .chk, .del, .q .ans { display: none !important; }
   @page { size: A4; margin: 8mm; }
+  body.print-week #tab-sheet { display: none !important; }
+  body.print-week #tab-week { display: block !important; }
+  body.print-week .print-only { display: inline; } body.print-week h3.print-only { display: block; }
+  body.print-week .week-grid { font-size: 16px; } body.print-week .week-grid td { height: 56px; border: 1px solid #999; }
 }

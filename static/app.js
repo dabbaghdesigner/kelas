@@ -33,8 +33,11 @@ async function load(url) {
 // ------------------------------------------------------------ teacher plan
 function renderPlan() {
   const el = $("#tab-plan");
-  if (DAY.closed) { el.innerHTML = `<div class="closed">🌙 ${esc(DAY.closed)} — کلاس تعطیل است</div>`; return; }
-  el.innerHTML = DAY.periods.map(p => `
+  if (DAY.closed) {  // a day the teacher closed can be reopened from here
+    el.innerHTML = (Store.planner.dayChange(DAY.date) ? dayChangeBar() : "") + `<div class="closed">🌙 ${esc(DAY.closed)} — کلاس تعطیل است</div>`;
+    bindDayChange(); return;
+  }
+  el.innerHTML = dayChangeBar() + DAY.periods.map(p => `
     <div class="period">
       <div class="period-head">
         <span class="no">زنگ ${fa(p.no)}</span><span class="subj">${esc(p.subject)}</span>
@@ -44,6 +47,7 @@ function renderPlan() {
       <ul class="timing">${p.timing.map(t => `<li>${esc(t)}</li>`).join("")}</ul>
       <div class="grades">${p.grades.map(g => gradeBlock(p, g)).join("")}</div>
     </div>`).join("");
+  bindDayChange();
 }
 
 function extraBlock(x) {
@@ -392,7 +396,7 @@ $("#importFile").onchange = async e => {
   try {
     const n = await Store.importText(await file.text());
     const parts = [n.days && `${fa(n.days)} روز دفتر کلاس`, n.starts && `${fa(n.starts)} نقطه شروع`,
-                   n.edits && `${fa(n.edits)} ویرایش محتوا`, n.questions && `${fa(n.questions)} سؤال`, n.school && "نام مدرسه/معلم"].filter(Boolean);
+                   n.edits && `${fa(n.edits)} ویرایش محتوا`, n.questions && `${fa(n.questions)} سؤال`, n.timetables && `${fa(n.timetables)} تغییر برنامه هفتگی/روز`, n.school && "نام مدرسه/معلم"].filter(Boolean);
     alert(parts.length ? `✅ ادغام شد (از ${n.from || "فایل"}):\n` + parts.join("\n") : "✅ فایل خوانده شد؛ چیز تازه‌ای نداشت (همه‌چیز از قبل یکی بود).");
     SCHOOL = await api("/api/school");
     load(`/api/day?date=${DAY ? DAY.date : ""}`);

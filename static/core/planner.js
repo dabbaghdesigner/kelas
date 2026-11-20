@@ -68,9 +68,24 @@ function makePlanner(DATA, STATE) {
     return prog;
   }
 
+  // ------------------------------------------------------------ timetable (teacher's weekly versions + one-day changes)
+  // STATE.timetables: {"1405/09/01": {v: {شنبه: [codes×5], …}, ts}} — a weekly timetable used from that date on
+  // STATE.day_changes: {"1405/09/03": {v: {subjects: [codes×5]} | {closed: "reason"} | null, ts}} — only that day
+  function weekTable(dateKey) {
+    const from = Object.keys(STATE.timetables || {}).filter(k => k <= dateKey && STATE.timetables[k].v).sort().pop();
+    return { from: from || null, days: from ? STATE.timetables[from].v : TT.days };
+  }
+  const dayChange = key => ((STATE.day_changes || {})[key] || {}).v || null;
+  function daySubjects(day) {
+    const key = Jalali.key(day), ch = dayChange(key);
+    return ch && ch.subjects ? ch.subjects : weekTable(key).days[DAYS[Jalali.weekday(day)]];
+  }
+
   // ------------------------------------------------------------ calendar
   function closed(day) {
     if (Jalali.weekday(day) > 4) return "پنجشنبه/جمعه";
+    const ch = dayChange(Jalali.key(day));
+    if (ch && ch.closed) return ch.closed;
     const key = Jalali.key(day, "-");
     if (CAL.holidays[key]) return CAL.holidays[key];
     for (const b of CAL.breaks) if (Jalali.parse(b.from) <= day && day <= Jalali.parse(b.to)) return b.name;
@@ -98,7 +113,8 @@ function makePlanner(DATA, STATE) {
       logged[`${it.period}|${it.grade}|${codeOf(it.subject)}`] = it.done ? "بله" : "خیر";
     const used = {};
     const take = k => { const i = (prog[k] || 0) + (used[k] || 0); used[k] = (used[k] || 0) + 1; return i; };
-    TT.days[info.weekday].forEach((code, i) => {
+    info.changed = !!(dayChange(key) && dayChange(key).subjects);
+    daySubjects(day).forEach((code, i) => {
       const p = i + 1, per = TT.periods[i];
       const [m, first] = mode(code, wd, p);
       const conference = (TT.conference_subjects || []).includes(code);
@@ -275,6 +291,7 @@ function makePlanner(DATA, STATE) {
     return { key: K(Number(g), code), value: target - logged, sessions: target };
   }
 
-  return { planFor, homework, taughtThisWeek, settings, lessons, startForTaughtUntil, closed, nextSchoolDay, prevSchoolDay,
+  const SUBJECTS = Object.keys(TT.weekly_hours).map(code => ({ code, name: FA[code], budget: TT.weekly_hours[code] }));
+  return { weekTable, dayChange, daySubjects, SUBJECTS, DAYS, PERIODS: TT.periods, planFor, homework, taughtThisWeek, settings, lessons, startForTaughtUntil, closed, nextSchoolDay, prevSchoolDay,
            progressBefore, faName, codeOf, ALL_CODES, GRADES };
 }
